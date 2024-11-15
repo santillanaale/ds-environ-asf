@@ -37,6 +37,7 @@ sp_occ <- read.table(file="data/egypt_data.txt", header = FALSE)
 str(sp_occ)
 sp_mass <- read.table(file="data/egypt_mass.txt", header=FALSE)
 str(sp_mass)
+colnames(sp_mass) <- c("f","m")
 ```
 ![Figure 2](figures/figure2.jpg)
 
@@ -45,9 +46,15 @@ The rows are arranged in the order of Figure 2 of the manuscript. To set the row
 ```{r labels}
 row_labs_sp <- c("Canis aureus", "Vulpes vulpes", "Lycaon pictus", "Hyaena hyaena", "Crocuta crocuta", "Panthera leo (long maned)", "Panthera leo (short maned)", "Panthera pardus", "Acinonyx jubatus", "Loxodonta africana", "Equus asinus", "Equus grevyi", "Equus quagga", "Diceros/Ceratotherium", "Sus scrofa",  "Phacochoerus aethiopicus", "Hippopotamus amphibius", "Giraffa camelopardalis", "Dama mesopotamica", "Camelus dromedarius", "Taurotragus oryx", "Tragelaphus spekei", "Addax nasomaculatus", "Oryx dammah", "Oryx beisa", "Hippotragus equinus", "Kobus kob", "Kobus megaceros", "Alcelaphus bucelaphus", "Connochaetes taurinus", "Litocranius walleri", "Ammodorcas clarkei", "Gazella dorcas", "Gazella leptoceros", "Gazella soemmerringii", "Capra ibex", "Ammotragus lervia", "Bos primigenius", "Syncerus caffer")
 
+rownames(sp_occ) <- row_labs_sp
+rownames(sp_mass) <- row_labs_sp
+
 ## Set 1 for predators, 0 for prey  
 carnivores <- c(rep(1, 9), rep(0, length(row_labs_sp)- 9))
 names(carnivores) <- row_labs_sp
+sp_occ <- cbind(sp_occ, carnivores)
+sp_mass <- cbind(sp_mass, carnivores)
+sp_mass$Species <- rownames(sp_mass)
 ```
 
 # Lab part 1: Creating our foodwebs based on body sizes.
@@ -55,26 +62,62 @@ names(carnivores) <- row_labs_sp
 a. Use the above vector of species names to label the row names of the species occurrence and the body size matrices.  The columns of the species occurrence matrix are time points, so we can leave those as V1 etc., but we should set the column names of the mass matrix as "f", "m" (female and male). Use 'head' to check each matrix to see if the names are displayed properly. 
 
 ```{r set-labels}
-
+head(sp_mass)
+head(sp_occ)
 ```
 Yeakel recommended an updated equation to estimate the probability a predator consumed a prey based on their relative body masses from [Rohr et al. 2010.](https://doi.org/10.1086/653667). The  probability of existence of a trophic link between a predator of body-size $m_i$ and a prey of body-size $m_j$ is given by:
 
-![Probabilitic feeding equation](figures/feeding_equ.png)
+![Probabilistic feeding equation](figures/feeding_equ.png)
 (P($A_{1j}$ = 1) is the probability predator i eats prey j). 
 
 a. Write a function and call it 'probEat' to implement the equation above. Round the probability to two decimal places.
 
 Below are the values of alpha, beta, and gamma for the Serengeti.  In addition, you will need a function to compute the inverse logit function because this equation is for the logit of the probability, so to calculate the 0-1 probability you will need to take the inverse logit of the other side of the equation. Also note, $log^2$ is equivalent to (log($m_i$/$m_j$))^2
 
-```{r inv-logit}
+```{r function-mass-comp}
+# Define probEat function
+probEat <- function(alpha, beta, gamma, m_j, m_i) {
+  log_mass_ratio <- log(m_j / m_i)
+  square_log_mass_ratio <- log_mass_ratio^2
+  logit_prob <- alpha + beta * log_mass_ratio + gamma * square_log_mass_ratio
+  probability <- exp(logit_prob) / (1 + exp(logit_prob))
+  return(probability)
+}
+
+# Constants
 alpha <- 2.51
 beta <- 0.79
 gamma <- -0.37
-  
-inv_logit <- function(x) exp(x)/(1+exp(x))
-```
 
-```{r function-mass-comp}
+
+# Filter predators and prey
+predators <- sp_mass[sp_mass$carnivore == 1, ]
+prey <- sp_mass[sp_mass$carnivore == 0, ]
+
+# Initialize results as a data frame
+probability_results <- data.frame(predator = character(),
+                      prey = character(),
+                      probability = numeric(),
+                      stringsAsFactors = FALSE)
+
+# Nested loop for probabilities
+for (i in 1:nrow(predators)) {
+  for (j in 1:nrow(prey)) {
+    m_j <- predators$f[i]
+    m_i <- prey$f[j]
+    probability <- probEat(alpha, beta, gamma, m_j, m_i)
+    
+    # Append to results
+    probability_results <- rbind(probability_results, data.frame(
+      predator = predators$Species[i],
+      prey = prey$Species[j],
+      probability = probability
+    ))
+  }
+}
+
+# Print results
+print(probability_results)
 
 ```
 
@@ -83,6 +126,22 @@ c. Now create networks of who eats whom. We will start with adjacency matrices. 
 Hint: if you start with a square matrix of all zeros (one row and one column for each species), you can use a for loop to fill in that matrix with probabilities calculated from your function above.
 
 ```{r create-adj-mat}
+#Empty matrix
+species_list <- sp_mass$Species
+num_species <- length(species_list)
+feeding_matrix <- matrix(0, nrow = num_species, ncol = num_species, dimnames = list(species_list, species_list))
+
+# Fill in the matrix with feeding probabilities based on body sizes
+for (i in 1:num_species) {
+  for (j in 1:num_species) {
+    if (i != j) {  # Ensure we're not calculating a species eating itself
+      m_j <- sp_mass$f[i]
+      m_i <- sp_mass$f[j]
+      probability <- probEat(alpha, beta, gamma, m_j, m_i)
+      feeding_matrix[i, j] <- probability
+    }
+  }
+}
 
 
 ```
@@ -91,7 +150,21 @@ d. Now that you have your matrix of potential feeding interactions based on body
 HINT: the function 'sweep' may be useful, though there are many approaches to do the needed matrix multiplication. Print the row and column sums. 
 
 ```{r create-adj-mat-2}
+# Now use the carnivores vector to zero out interactions involving herbivores
+feeding_matrix <- sweep(feeding_matrix, 2, carnivores, "*")  # Zero out columns of herbivores
 
+# Print the row and column sums
+row_sums <- rowSums(feeding_matrix)
+col_sums <- colSums(feeding_matrix)
+
+# Print the sums to see feeding interactions
+print("Row sums (predator feeding counts):") #number of species each predator feeds on
+# How likely a predator (species i) is to feed on any of the prey species (species j), summed across all prey species.
+print(row_sums)
+
+print("Column sums (prey being fed upon counts):") #number of predators feeding on each prey species
+# The total feeding probability for that species as prey (across all predators).
+print(col_sums)
 ```
 
 # Lab part 2: Breaking the networks into time periods
