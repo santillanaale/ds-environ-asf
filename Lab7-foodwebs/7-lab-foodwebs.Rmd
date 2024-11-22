@@ -54,6 +54,7 @@ carnivores <- c(rep(1, 9), rep(0, length(row_labs_sp)- 9))
 names(carnivores) <- row_labs_sp
 sp_occ <- cbind(sp_occ, carnivores)
 sp_mass <- cbind(sp_mass, carnivores)
+#sp_occ$Species <- rownames(sp_occ)
 sp_mass$Species <- rownames(sp_mass)
 ```
 
@@ -146,7 +147,7 @@ for (i in 1:num_species) {
 
 ```
 
-d. Now that you have your matrix of potential feeding interactions based on body size, use the 'carnivores' vector created above to set all of the feeding interactions of herbivores (0s in that vector) to zero. In foodwebs the columns are the higher trophic level and the rows are the lower.
+d. Now that you have your matrix of potential feeding interactions based on body size, use the 'carnivores' vector created above to set all of the feeding interactions of herbivores (0s in that vector) to zero. In food webs the columns are the higher trophic level and the rows are the lower.
 HINT: the function 'sweep' may be useful, though there are many approaches to do the needed matrix multiplication. Print the row and column sums. 
 
 ```{r create-adj-mat-2}
@@ -176,7 +177,18 @@ Use the function 'empty' from the bipartite package to empty the matrix of rows 
 HINT: You will need to zero out the rows where a species in not present in that time period and the columns. The function 'sweep' may be useful again.
 
 ```{r t1-time-webs}
+# Extract the presence vector for the second time period
+presence <- sp_occ[, 2]  # Second column of species occurrence matrix
 
+# Zero out rows and columns of extinct species in the feeding matrix
+filtered_matrix <- sweep(feeding_matrix, 1, presence, "*")  # Zero out rows
+filtered_matrix <- sweep(filtered_matrix, 2, presence, "*")  # Zero out columns
+
+active_species <- rowSums(filtered_matrix) > 0  # Rows with interaction probabilities > 0
+print(paste("Number of species in the second time period:", sum(active_species)))  # Should be 36
+#cleaned_matrix <- empty(filtered_matrix)
+print(nrow(filtered_matrix))
+print(sum(sp_occ[,2]))
 ```
 
 b. Now create a network for all of the time points by creating a list where each element is a network. You will need to use a for loop, or an 'lapply' if you feel like experimenting with apply functions. Print the first 5 columns and rows of the 5th time period. 
@@ -184,34 +196,136 @@ b. Now create a network for all of the time points by creating a list where each
 HINT: If choosing the for loop route, remember to create an empty list of a specific length use the function 'vector'. To access a specific element of a list, use [[]], for example cool_list[[1]] accesses the first element of the list.
 
 ```{r all-time-webs}
+num_time_periods <- ncol(sp_occ)
+time_period_networks <- vector("list", length = num_time_periods)
 
+# Loop through each time period and create a filtered network
+for (i in 1:num_time_periods) {
+  # Extract the presence vector for the current time period
+  presence <- sp_occ[, i]
+  
+  # Zero out rows and columns for extinct species
+  filtered_matrix <- sweep(feeding_matrix, 1, presence, "*")  # Zero out rows
+  filtered_matrix <- sweep(filtered_matrix, 2, presence, "*")  # Zero out columns
+  
+  # Clean the matrix to remove empty rows and columns
+  time_period_networks[[i]] <- filtered_matrix
+}
+
+# Extract the matrix for the 5th time period
+matrix_time_5 <- time_period_networks[[5]]
+
+# Print the first 5 rows and columns
+print(matrix_time_5[1:5, 1:5])
 ```
 
 # Lab part 3: Visualize the networks
 a. Convert the adjacency matrices to igraph class objects using the function 'graph_from_adjacency_matrix'. You can use a for loop or an lapply. Because these are food webs, set the argument mode to "directed" and the argument diag to FALSE (this means a species cannot consumer members of its own species, i.e., no canabalism/self-loops). Also remember that these interactions are weighted.  
 
 ```{r graphs}
+# Convert adjacency matrices to igraph objects
+igraph_networks <- lapply(time_period_networks, function(matrix) {
+  graph_from_adjacency_matrix(
+    matrix, 
+    mode = "directed", 
+    weighted = TRUE, 
+    diag = FALSE
+  )
+})
 
 ```
 
 b. Plot three networks of your choice, using different colors for the predators and prey.
 
 ```{r plot-g1}
-## assign groups as carnivore or herbivore
+# Define colors based on carnivore status
+node_colors <- ifelse(carnivores == 1, "red", "green")  # Red for predators, green for prey
+groups <- ifelse(carnivores == 1, "Predator", "Prey")
 
 
-## convert to a network 3d object
+# Choose three networks to plot
+graph_time_5 <- igraph_networks[[5]]
+graph_time_10 <- igraph_networks[[10]]
+graph_time_20 <- igraph_networks[[20]]
 
-## plot the network
+# Convert igraph objects to networkD3 objects with group information
+network_time_5 <- igraph_to_networkD3(graph_time_5, group = groups)
+network_time_10 <- igraph_to_networkD3(graph_time_10, group= groups)
+network_time_20 <- igraph_to_networkD3(graph_time_20, group = groups)
 
+plot(
+  graph_time_5,
+  vertex.label = V(graph_time_5)$name,  # Add species names as labels
+  edge.width = E(graph_time_5)$weight * 5,  # Scale edge width by feeding probability
+  vertex.size = 10,  # Uniform vertex size
+  edge.arrow.size = 0.5,  # Smaller arrow size
+  layout = layout_in_circle  # Choose a circular layout
+)
+
+# Plot with forceNetwork
+forceNetwork(
+  Links = network_time_5$links, 
+  Nodes = network_time_5$nodes, 
+  Source = "source", 
+  Target = "target", 
+  Value = "value", 
+  NodeID = "name",
+  Group = "group",
+  opacity = 0.8, 
+  zoom=TRUE, 
+  opacityNoHover = 0.9
+)
 
 ```
 
 ```{r plot-g2}
+plot(
+  graph_time_10,
+  vertex.label = V(graph_time_10)$name,  # Add species names as labels
+  edge.width = E(graph_time_10)$weight * 5,  # Scale edge width by feeding probability
+  vertex.size = 10,  # Uniform vertex size
+  edge.arrow.size = 0.5,  # Smaller arrow size
+  layout = layout_in_circle  # Choose a circular layout
+)
+
+# Plot with forceNetwork
+forceNetwork(
+  Links = network_time_10$links, 
+  Nodes = network_time_10$nodes, 
+  Source = "source", 
+  Target = "target", 
+  Value = "value", 
+  NodeID = "name",
+  Group = "group",
+  opacity = 0.8, 
+  zoom=TRUE, 
+  opacityNoHover = 0.9
+)
 
 ```
 
 ```{r plot-g3}
+plot(
+  graph_time_20, 
+  vertex.label = V(graph_time_20)$name,  # Add species names as labels
+  edge.width = E(graph_time_20)$weight * 5,  # Scale edge width by feeding probability
+  vertex.size = 10,  # Uniform vertex size
+  edge.arrow.size = 0.5,  # Smaller arrow size
+  layout = layout_in_circle  # Choose a circular layout
+)
 
+# Plot with forceNetwork
+forceNetwork(
+  Links = network_time_20$links, 
+  Nodes = network_time_20$nodes, 
+  Source = "source", 
+  Target = "target", 
+  Value = "value", 
+  NodeID = "name",
+  Group = "group",
+  opacity = 0.8, 
+  zoom=TRUE, 
+  opacityNoHover = 0.9
+)
 ```
 
